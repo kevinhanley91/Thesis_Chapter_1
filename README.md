@@ -6,6 +6,8 @@ __Context:__ The first chapter of my research MSc in statistics thesis
 
 __Language:__ SAS
 
+__Note:__ I did this project before I knew of the wonders of version control and git. Also the commenting and coding practices leave something to be desired. 
+
 ## Introduction
 Intravenous conscious sedation allows surgery to be performed with reduced pain and trauma to the patient; however, hypoxemia resulting from oxygen desaturation for a sustained period of time is an ever present risk. The identification of a risk group provides the opportunity for additional observance and extra precautions to be provided for those most at risk.  Previous papers have identified risk factors during varying procedures and under the sedation of different medications. There has been little analysis performed in an oral surgery context, with even less by the use of recurrent event survival analysis methods. Recurrent events allow for the possibility of multiple contributions from each patient to the dataset. 
 
