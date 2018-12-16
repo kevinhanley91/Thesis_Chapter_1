@@ -53,16 +53,7 @@ data workingdata3 (Drop = m DateofTreatment);
 	if index(RelTime1,'-') then delete;
 run;
 
-proc freq data=workingdata3;
-	tables SpO2;
-run;
-
-data missing (Drop = RecTime InfTime1 InfTime2 InfTime3 InfTime4 InfTime5 InfTime6 InfTime7 InfTime8 InfTime9 BMI ASA Sys Dias Age Infusions Quarter);
-	set workingdata3;
-	if SpO2 = '.';
-run;
-
-proc print data=missing;
+proc print data=workingdata3 (obs=100);
 run;
 
 /* produce Graphs og SpO2 per patient */
@@ -70,7 +61,7 @@ symbol1 colour=red interpol = join;
 proc gplot data=workingdata3;
 	title 'SpO2 for M001';
 	where Patient = 'M001';
-  	plot SpO2*Reltime1 = Patient;
+  	plot SpO2*Reltime1 = Patient / vref=94 ;
 run;
 
 proc gplot data=workingdata3;
@@ -338,12 +329,11 @@ run;
 
 
 
-**********************************************************************************************************
-**********************************************************************************************************
 
+/* *************************************************************************************************** */
 
-trying to allow for a min stable period of 55 seconds between events ;
-
+/* Looking at Event times only. Calculate the difference in time between rows to find the times greater than 5 intervals.
+	This means that the SpO2 rose to 94% or above during these gaps. Therefore a new event was formed */
 data MultipleEvents;
 	set Event2;
 		by Patient;
@@ -374,6 +364,7 @@ run;
 proc print data=MultipleEvents2;
 run;
 
+/* Counting the number of events per patient */
 data NumEvents;
 	set MultipleEvents2;
 	by Patient;
@@ -452,66 +443,12 @@ run;
 proc print data=NumEvents3;
 run;
 
-data StablePeriod;
-	set NumEvents3;
-	LastEvent = lag(EventStop);
-	by Patient;
-		if First.Patient then LastEvent = 0;
-run;
-
-proc print data=StablePeriod;
-run;
-
-data StablePeriod1;
-	set StablePeriod;	
-	by Patient;
-		if First.Patient then Strata = 0;
-		Strata + 1;
-	StableLength = EventStart - LastEvent;
-	if StableLength < 60 then Remove=1;
-		else Remove=0;
-run;
-
-proc print data=StablePeriod1;
-run;
-
-data StablePeriod2;
-	set StablePeriod1;
-	if Patient='M003' and Strata=1 then EventStop=550;
-	if Patient='M006' and Strata=1 then EventStop=265;
-	if Patient='M007' and Strata=1 then EventStop=605;
-	if Patient='M007' and Strata=8 then EventStop=1455;
-	if Patient='M007' and Strata=10 then EventStop=2090;
-	if Patient='M008' and Strata=1 then EventStop=2045;
-	if Patient='M020' and Strata=1 then EventStop=590;
-	if Patient='M020' and Strata=4 then EventStop=750;
-	if Patient='M020' and Strata=6 then EventStop=1580;
-	if Patient='M026' and Strata=1 then EventStop=500;
-	if Patient='M031' and Strata=1 then EventStop=635;
-	if Patient='M031' and Strata=7 then EventStop=1930;
-	if Patient='M031' and Strata=9 then EventStop=2250;
-	if Patient='M032' and Strata=5 then EventStop=2660;
-	if Patient='M036' and Strata=2 then EventStop=680;
-	if Patient='M017' and Strata=1 then Remove=0;
-run;
-
-proc print data=StablePeriod2;
-run;
-
-data CombinedEvents;
-	set StablePeriod2;
-	if Remove=1 then delete;
-run;
-
-proc print data=CombinedEvents;
-run;
-
 /* If we want the time that the patient is at risk for then it will be represented by the time that the patient is 
 	not experiencing an event */
 
 /* The start of each observation period will be 5 seconds (1 time point) after the end of the event */
 data NumEvents4;
-	set CombinedEvents;
+	set NumEvents3;
 	T_Start= lag(EventStop) + 5;
 run;
 
@@ -618,34 +555,104 @@ run;
 
 
 /* Merges the two datasets; the Patients with no events in one and the patients with events in the other */
-data AG (Drop = FirstRec LastRec LastEventObs Time_1 Diff_Time EventNum LastP EventStart EventStop LastEvent Strata StableLength Remove);
+data AG (Drop = FirstRec LastRec LastEventObs Time_1 Diff_Time EventNum LastP EventStart EventStop);
 	set NoEvents ObsOfEvents;
 	by Patient T_Start;
-run;
-
-data Events;
-	set AG;
-	if Event = 1;
-run;
-
-proc print data=Events;
 run;
 
 proc print data=AG;
 run;
 
+/* ******************************** */
+
+data AllEvents (Drop = FirstRec LastRec LastEventObs Time_1 Diff_Time EventNum LastP);
+	set NoEvents ObsofEvents;
+	if Event=1;
+	LengthofEvent = EventStop - EventStart;
+	StartNewPeriod = lag(EventStop + 5);
+	by Patient;
+		if First.Patient then StartNewPeriod = 0;
+run;
+
+proc print data=AllEvents;
+run;
+
+/* removing short events */
+
+data AllEvents;
+	set AllEvents;
+	if LengthofEvent <= 10 then Delete;
+run;
+
+proc print data=AllEvents;
+run;
+
+proc sort data=AllEvents;
+	by descending Patient descending T_Start;
+run;
+
+/* ******************************** */
 
 /* Introduces a stratification variable */
-data AG;
+data AG1;
 	set AG;
 	by Patient;
 		if First.Patient then Strata = 0;
 		Strata + 1;
 run;
 
-proc print data=AG;
+proc print data=AG1;
 	title 'Table of observations for Andersen-Gill model';
 run;
+
+
+*****
+*****
+*****
+*****
+*****
+*****;
+/*
+data tony1;
+	set AG1;
+	time=RelTime1;
+run;
+
+data tony2;
+	set tony1;
+	if Strata>1 then time=.;
+run;
+
+data tony3;
+	set tony2;
+	retain _time;
+	if not missing(time) then _time=time;
+	else  time=_time;
+run;
+
+proc print data=tony3;
+run;
+
+data tony2;
+	set tony1;
+	by Patient;
+	if Strata=2 then start1=lag(RelTime1);
+run;
+
+proc print data=tony2;
+run;
+
+data test;
+	set AG;
+	Lag = lag(RelTime1);
+run;
+
+proc print data=AG;
+run;
+
+title;
+
+*/
 
 /* Running the Andersen-Gill model */
 proc phreg data=AG;
@@ -665,14 +672,6 @@ run;
 
 title;
 
-/* Andersen-Gill model with robust sandwich estimate for covariance ties accomodation */
-proc phreg data=AG covs covm;
-	title 'Results of the Andersen-Gill model with robust sandwich estimate for covariance';
-	class ASA(ref='1') Quarter(ref='1');
-	model (T_Start T_Stop)*Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits ties=Exact;
-run;
-
-title;
 
 proc phreg data=AG;
 	class ASA(ref='1');
@@ -710,15 +709,12 @@ data PWPPlot;
 		if Last.Patient then Event=0;
 run;
 
-proc print data=PWPPlot;
-run;
-
 /* This produces a plot of the events experienced by each patient */
 ods graphics on;
 
 proc reliability data=PWPPlot;
 	unitid Patient;
-	mcfplot T_Stop * Event(0) / nocenprint EVENTPLOT;
+	mcfplot RelTime1 * Event(0) / nocenprint EVENTPLOT;
 run;
 
 ods graphics off;
@@ -742,7 +738,7 @@ title;
 
 /* Reducing the number of events possible so as not to have certain patients having too much influence */
 proc phreg data=PWP;
-	where Strata <= 4;
+	where Strata < 6;
 	title 'Fitting the PWP total time model';
 	class ASA(ref='1') Quarter(ref='1');
 	model (T_Start, T_Stop) * Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits;
@@ -752,48 +748,9 @@ run;
 
 proc phreg data=PWP;
 	title 'Fitting the PWP gaptime model';
-	where Strata <= 4;
+	where Strata < 6;
 	class ASA(ref='1') Quarter(ref='1');
 	model GapTime * Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits;
-	strata Strata;
-run;
-
-title;
-
-
-/* Accomodating for ties with the exact method */
-
-proc phreg data=PWP;
-	title 'Fitting the PWP total time model';
-	class ASA(ref='1') Quarter(ref='1');
-	model (T_Start, T_Stop) * Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits ties=exact;
-	strata Strata;
-run;
-
-proc phreg data=PWP;
-	title 'Fitting the PWP gaptime model';
-	class ASA(ref='1') Quarter(ref='1');
-	model GapTime * Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits ties=exact;
-	strata Strata;
-run;
-
-title;
-
-
-proc phreg data=PWP;
-	where Strata <= 4;
-	title 'Fitting the PWP total time model';
-	class ASA(ref='1') Quarter(ref='1');
-	model (T_Start, T_Stop) * Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits ties=exact;
-	strata Strata;
-run;
-
-
-proc phreg data=PWP;
-	title 'Fitting the PWP gaptime model';
-	where Strata <= 4;
-	class ASA(ref='1') Quarter(ref='1');
-	model GapTime * Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits ties=exact;
 	strata Strata;
 run;
 
@@ -863,7 +820,7 @@ title;
 proc phreg data=PWP;
 	title 'Results of the Condtional Frailty model with Gaussian random effects using Gaptime';
 	class ASA(ref='1') Quarter(ref='1') Patient;
-	model Gaptime*Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits ties=exact;
+	model Gaptime*Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits ties=Efron;
 	random Patient / dist=lognormal;
 	strata Strata;
 run;
@@ -871,10 +828,10 @@ run;
 title;
 
 proc phreg data=PWP;
-	title 'Results of the Condtional Frailty model with Gaussian random effects using Gaptime and event limit';
-	where strata <= 4;
+	title 'Results of the Condtional Frailty model with Lognormal random effects using Gaptime and event limit';
+	where strata < 6;
 	class ASA(ref='1') Quarter(ref='1') Patient;
-	model Gaptime*Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits ties=Exact;
+	model Gaptime*Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits;
 	random Patient / dist=lognormal;
 	strata Strata;
 run;
@@ -905,9 +862,9 @@ title;
 /* uses the Conditional frailty mode with gammma, gap time and restricts the number of strata */
 proc phreg data=PWP;
 	title 'Results of the Condtional Frailty model with gamma random effects using Gaptime';
-	where Strata <= 4;
+	where Strata < 6;
 	class ASA(ref='1') Quarter(ref='1') Patient;
-	model Gaptime*Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits ties=Exact;
+	model Gaptime*Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits;
 	random Patient / dist=gamma;
 	strata Strata;
 run;
@@ -915,13 +872,32 @@ run;
 title;
 
 
+****************************************************;
+
+* Macro for the transition probabilities ;
+
+%ptransit(data = PWP, time1 = T_Start,
+	time2 = T_Stop, event = Event,
+	xvars = BMI ASA Sys Dias Age Infusions Quarter,
+	id = Patient, new = TransProb);
+
+
+
+
+****************************************************;
+
+proc phreg data=PWP;
+	class ASA(ref='1') Quarter(ref='1') Patient;
+	model Gaptime*Event(0) = BMI ASA Sys Dias Age Infusions Quarter / risklimits;
+	random Patient / dist=gamma solution (2 4);
+	bayes seed=1 dispersionprior=igamma (shape=3, scale=3);
+	title 'Bayesian Analysis for Gamma Frailty Model';
+run;
 
 
 
 
 /****************************************************************************************************/
-
-goptions reset=all;
 
 /* Kaplan Meier Test */
 
@@ -931,7 +907,20 @@ proc lifetest data= CoxPH;
 	title 'outputs all confidence limits';
 run;
 
+goptions reset=all;
+axis1 label=(angle=90); 
+proc gplot data= outdata ;
+	title ‘Kaplan-Meier plot with confidence bands’;
+	label survival='Survival Probability';
+	label RelTime1='Time to First Event (Seconds)';
+	plot survival * RelTime1 hw_UCL * RelTime1 hw_LCL * RelTime1 /overlay vaxis=axis1;
+	symbol1 v=none i=stepj c=black line=1;
+	symbol2 v=none i=stepj c=black line=2;
+	symbol3 v=none i=stepj c=black line=2;
+run; quit;
 
+
+* uses the Hall Wellner Estimate;
 ods graphics on;
 
 proc lifetest data=CoxPH atrisk plots=survival;
@@ -940,19 +929,6 @@ proc lifetest data=CoxPH atrisk plots=survival;
 run;
 
 ods graphics off;
-
-data FirstEvent;
-	set PWP;
-	if Strata = 1;
-run;
-
-proc print data=FirstEvent;
-run;
-
-proc lifetest data=FirstEvent atrisk plots=survival;
-	title ‘Kaplan-Meier plot for time to second event’;
-	time GapTime * Event (0);
-run;
 
 
 /* time to second event Kaplan-Meier */
@@ -1016,11 +992,171 @@ proc lifetest data=FifthEvent atrisk plots=survival;
 	time GapTime * Event (0);
 run;
 
+
+proc lifetest data=PWP atrisk plots=survival;
+	title ‘Kaplan-Meier plot for all events’;
+	time T_Stop * Event (0);
+run;
+
+* uses the Equal Precision Estimate;
+ods graphics on;
+
+proc lifetest data=CoxPH atrisk plots=survival(cb = ep test);
+	time RelTime1 * Event (0);
+run;
+
+ods graphics off;
+
 title;
 
-proc freq data=PWP;
+* uses both the Hall Wellner and Equal Precision Estimates;
+ods graphics on;
+
+proc lifetest data=CoxPH atrisk plots=survival(cb = all test atrisk);
+	time RelTime1 * Event (0);
 run;
 
-proc print data=PWP;
-where Event=1;
+ods graphics off;
+
+* Failure Plot;
+/* Must add in extra end point for patient M007 */
+data Last7;
+	set PWP;
+	if Patient="M007";
 run;
+
+data Last7;
+set Last7;
+	by Patient;
+		if Last.Patient then LastPat = 1;
+			else LastPat = 0;
+run;
+
+data Last7;
+	set Last7;
+	if LastPat = 0 then delete;
+run;
+
+proc print data=Last7;
+run;
+
+data Last7;
+	set Last7;
+	T_Start = 2080;
+	T_Stop = 2090;
+	Event = 0;
+run;
+
+data FakePWP;
+	set PWP Last7;
+	by Patient T_Start;
+run;
+
+
+ods graphics on;
+
+proc reliability data=FakePWP;
+   unitid Patient;
+   mcfplot T_Stop * Event(0) / nocenprint eventplot nohlabel;
+run;
+ods graphics off;
+
+
+* Failure Plot;
+ods graphics on;
+
+proc lifetest data=CoxPH atrisk plots=survival(cb = all failure test);
+	time RelTime1 * Event (0);
+run;
+
+ods graphics off;
+
+/* Nelson Aalen Test */
+
+proc lifetest data=CoxPH atrisk plots=survival(cb = hw) nelson;
+	time RelTime1 * Event (0);
+run;
+
+
+/* Getting the mean and median times to first event */
+
+
+proc print data=CoxPH;
+run;
+
+data NoEvents;
+	set PWP;
+	if Event = 1;
+run;
+
+proc print data=NoEvents;
+run;
+
+data ShortEvents;
+	set PWP;
+	if Event = 1;
+	if GapTime <= 10;
+run;
+
+proc print data=ShortEvents;
+run;
+
+proc freq data=NoEvents;
+	tables Patient Strata;
+run;
+
+data FirstEvents;
+	set CoxPH;
+	if Event = 1;
+run;
+
+proc print data=FirstEvents;
+run;
+
+data NoEvents;
+	set CoxPH;
+	if Event = 0;
+run;
+
+proc print data=NoEvents;
+run;
+
+
+data SecondEvent;
+	set PWP;
+	if Event=1;
+	if Strata = 2;
+run;
+
+proc print data=SecondEvent;
+run;
+
+
+data ThirdEvent;
+	set PWP;
+	if Event=1;
+	if Strata = 3;
+run;
+
+proc print data=ThirdEvent;
+run;
+
+
+data FourthEvent;
+	set PWP;
+	if Event=1;
+	if Strata = 4;
+run;
+
+proc print data=FourthEvent;
+run;
+
+data OtherEvent;
+	set PWP;
+	if Event=1;
+	if Strata > 1;
+run;
+
+proc print data=OtherEvent;
+run;
+
